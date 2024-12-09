@@ -1,8 +1,14 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form, Request
 from tortoise.exceptions import DoesNotExist
 from app.core.security import hash_password, verify_password, create_access_token, pwd_context
 from app.db.session import init_db
 from tortoise.contrib.pydantic import pydantic_model_creator
+
+
+from fastapi.responses import JSONResponse
+from io import BytesIO
+from pathlib import Path
+import shutil
 
 
 from app.models import (
@@ -26,9 +32,11 @@ from app.models import (
     Shipping, 
     ShippingCompany, 
     Tutorial,
-    BusinessOwner
+    BusinessOwner,
+    Category
 )
 from app.schemas import (
+    ProductWithImageUrl,
     UserCreate, 
     LoginRequest, 
     UserResponse, 
@@ -43,7 +51,8 @@ from app.schemas import (
     TutorialCreate, 
     TutorialResponse,
     BusinessOwnerResponse,
-    BusinessOwnerCreate
+    BusinessOwnerCreate,
+    CategoryCreateSchema, CategorySchema
 )
 
 
@@ -142,42 +151,114 @@ async def login_for_access_token(login_request: LoginRequest):
 
 
 
-# Product Endpoints
+@router.post("/categories/", response_model=CategorySchema)
+async def create_category(category: CategoryCreateSchema):
+    # Create a new category in the database
+    category_obj = await Category.create(**category.dict())
+    return category_obj
+
+@router.get("/categories/{category_id}", response_model=CategorySchema)
+async def get_category(category_id: int):
+    try:
+        category_obj = await Category.get(id=category_id)
+        return category_obj
+    except DoesNotExist:
+        raise HTTPException(status_code=404, detail="Category not found")
+
+@router.get("/categories/", response_model=list[CategorySchema])
+async def get_categories():
+    categories = await Category.all()
+    return categories
+
+
+
+
+
+
+# Updated endpoint to accept individual fields in the form
 @router.post("/products", response_model=ProductResponse)
-async def create_product(product: ProductCreate):
+async def create_product(
+    name: str = Form(...),
+    category_id: int = Form(...),
+    price: float = Form(...),
+    quantity: int = Form(...),
+    description: str = Form(...),
+    seller_id: int = Form(...),
+    image: UploadFile = File(None)  # Accept image upload (optional)
+):
     # Check if the seller exists
     try:
-        seller = await BusinessOwner.get(id=product.seller_id)
+        seller = await BusinessOwner.get(id=seller_id)
     except DoesNotExist:
         raise HTTPException(status_code=400, detail="Seller does not exist")
 
-    # Create a new product
+    # Handle image upload (if provided)
+    image_url = None
+    if image:
+        # Define the path where the image will be saved
+        image_path = Path("static/images") / image.filename
+        
+        # Ensure the directory exists before saving the image
+        image_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Save the image to the static directory
+        image_url = str(image_path)  # Store the image path (URL) for referencing
+        with open(image_path, "wb") as f:
+            shutil.copyfileobj(image.file, f)  # Save the image file to the disk
+
+    # Get the category object
+    try:
+        category = await Category.get(id=category_id)
+    except DoesNotExist:
+        raise HTTPException(status_code=400, detail="Category does not exist")
+
+    # Create the product in the database
     db_product = await Product.create(
-        name=product.name,
-        category=product.category,
-        price=product.price,
-        quantity=product.quantity,
-        description=product.description,
-        seller_id=product.seller_id  # Ensure the foreign key relationship is maintained
+        name=name,
+        category=category,
+        price=price,
+        quantity=quantity,
+        description=description,
+        seller_id=seller_id,  # Ensure the foreign key relationship is maintained
+        image=image_url if image else None  # Store the image URL in the product model if image was provided
     )
 
     # Return the created product as a response using ProductResponse
     return ProductResponse.from_orm(db_product)
 
 
-@router.get("/products", response_model=list[Product_Pydantic])
-async def get_products(skip: int = 0, limit: int = 100):
+
+
+import logging
+
+# logging.basicConfig(level=logging.DEBUG)
+
+
+@router.get("/products", response_model=list[ProductWithImageUrl])
+async def get_products(request: Request, skip: int = 0, limit: int = 100):
     """
     Get a list of products with pagination.
-    - skip: The number of records to skip (default is 0).
-    - limit: The maximum number of records to return (default is 100).
     """
     products = await Product_Pydantic.from_queryset(Product.all().offset(skip).limit(limit))
-    
+
     if not products:
         raise HTTPException(status_code=404, detail="No products found")
-    
-    return products
+
+    products_with_url = []
+    for product in products:
+        product_dict = product.dict()  # Convert to dictionary
+        if product.image:
+            product_dict['image_url'] = f"{request.base_url}{product.image}"
+        else:
+            product_dict['image_url'] = 'https://placehold.co/400'  # Fallback image URL
+
+        products_with_url.append(product_dict)
+
+    return products_with_url
+
+
+
+
 
 
 

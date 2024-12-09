@@ -37,7 +37,7 @@ class LoginRequest(BaseModel):
     password: str
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 # -------------------- Business Owner Schemas -------------------- #
@@ -72,26 +72,56 @@ class BusinessOwnerResponse(BaseModel):
 
 
 
+
+class CategoryCreateSchema(BaseModel):
+    name: str
+
+    class Config:
+        from_attributes = True
+
+class CategorySchema(CategoryCreateSchema):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+
 # -------------------- Product Schemas -------------------- #
 class ProductCreate(BaseModel):
     name: str = Field(..., max_length=255)
-    category: str = Field(..., max_length=50)
+    category_id: int  # The ID of the Category
     price: float
     quantity: int
     description: Optional[str]
     seller_id: int  # The ID of the BusinessOwner selling the product
+    image: str
 
 class ProductResponse(BaseModel):
     id: int
     name: str
-    category: str
+    category: int  # Use category name instead of ID
     price: float
     quantity: int
     description: Optional[str]
     seller_id: int
+    image: Optional[str]  # Include image URL in response
 
     class Config:
         from_attributes = True
+
+
+
+class ProductWithImageUrl(BaseModel):
+    id: int
+    name: str
+    price: float
+    image: Optional[str] = None
+    image_url: str  # Add image_url field
+
+    class Config:
+        from_attributes = True
+
 
 
 # -------------------- Order Schemas -------------------- #
@@ -189,4 +219,4 @@ class TutorialResponse(TutorialBase):
     updated_at: datetime
 
     class Config:
-        orm_mode = True
+        from_attributes = True

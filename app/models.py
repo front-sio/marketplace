@@ -2,6 +2,7 @@ from tortoise import fields
 from tortoise.models import Model
 from tortoise.contrib.pydantic import pydantic_model_creator
 from passlib.context import CryptContext
+from typing import Optional
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -59,14 +60,31 @@ class BusinessOwner(Model):
         return self.business_name
 
 
+
+# Category Model
+class Category(Model):
+    id = fields.IntField(pk=True)
+    name = fields.CharField(max_length=50)
+    
+    # Reverse relationship to products
+    products = fields.ReverseRelation["Product"]
+    
+    def __str__(self):
+        return self.name
+
+
+
+
+
 # Product Model
 class Product(Model):
     id = fields.IntField(pk=True)
     name = fields.CharField(max_length=255)
-    category = fields.CharField(max_length=50)
+    category = fields.ForeignKeyField("models.Category", related_name="products", null=False)  # ForeignKey to Category
     price = fields.DecimalField(max_digits=10, decimal_places=2)
     quantity = fields.IntField(default=0)  # Default to 0 if no quantity is provided
     description = fields.TextField(null=True)  # Allow null values for description
+    image = fields.CharField(max_length=255, null=True)  # Field for image URL (could be a path or URL)
 
     # Seller relationship
     seller = fields.ForeignKeyField("models.BusinessOwner", related_name="products", null=True)  # Seller can be optional
@@ -76,6 +94,7 @@ class Product(Model):
 
     def __str__(self):
         return self.name
+
 
 
 # Order Model
@@ -165,3 +184,16 @@ ShippingCompany_Pydantic = pydantic_model_creator(ShippingCompany, name="Shippin
 ShippingCompany_PydanticIn = pydantic_model_creator(ShippingCompany, name="ShippingCompanyIn", exclude_readonly=True)
 Tutorial_Pydantic = pydantic_model_creator(Tutorial, name="Tutorial")
 Tutorial_PydanticIn = pydantic_model_creator(Tutorial, name="TutorialIn", exclude_readonly=True)
+
+
+
+
+
+# Add computed `image_url` property
+class ProductWithImageUrl(Product_Pydantic):
+    @property
+    def image_url(self) -> Optional[str]:
+        if self.image:
+            return f"/static/images/{self.image}"  # Assuming image is stored in a static folder
+        return None  # Return None or placeholder if no image available
+        
