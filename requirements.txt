@@ -4,6 +4,7 @@ tortoise-cli
 aerich
 uvicorn[gunicorn]
 pydantic
+pydantic-settings
 python-dotenv
 passlib
 psycopg2-binary
