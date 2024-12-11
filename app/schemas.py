@@ -29,6 +29,7 @@ class UserRead(BaseModel):
 
 
 
+
 # -------------------- Business Owner Schemas -------------------- #
 
 
@@ -38,6 +39,15 @@ class LoginRequest(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+
+# Define the response model for login
+class SignInResponse(BaseModel):
+    access_token: str
+    token_type: str
+    user: UserResponse
+
 
 
 # -------------------- Business Owner Schemas -------------------- #
@@ -220,3 +230,14 @@ class TutorialResponse(TutorialBase):
 
     class Config:
         from_attributes = True
+
+
+
+
+class SummaryResponse(BaseModel):
+    total_products: int
+    total_orders: int
+    total_shipping_companies: int
+    total_business_owners: int
+    total_product_value: float
+    total_order_value: float

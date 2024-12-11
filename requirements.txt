@@ -2,7 +2,7 @@ fastapi
 tortoise-orm
 tortoise-cli
 aerich
-uvicorn
+uvicorn[gunicorn]
 pydantic
 python-dotenv
 passlib

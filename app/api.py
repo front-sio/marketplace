@@ -3,6 +3,8 @@ from tortoise.exceptions import DoesNotExist
 from app.core.security import hash_password, verify_password, create_access_token, pwd_context
 from app.db.session import init_db
 from tortoise.contrib.pydantic import pydantic_model_creator
+from app.core.security import get_current_user  # Assuming you have a function to get the logged-in user
+
 
 
 from fastapi.responses import JSONResponse
@@ -40,6 +42,7 @@ from app.schemas import (
     UserCreate, 
     LoginRequest, 
     UserResponse, 
+    SignInResponse,
     ProductCreate, 
     ProductResponse, 
     OrderCreate, 
@@ -52,7 +55,8 @@ from app.schemas import (
     TutorialResponse,
     BusinessOwnerResponse,
     BusinessOwnerCreate,
-    CategoryCreateSchema, CategorySchema
+    CategoryCreateSchema, CategorySchema,
+    SummaryResponse
 )
 
 
@@ -128,7 +132,7 @@ async def register_business_owner(business_owner_data: BusinessOwnerCreate):
 
 
 
-@router.post("/token")
+@router.post("/token", response_model=SignInResponse)
 async def login_for_access_token(login_request: LoginRequest):
     await init_db()
     
@@ -145,13 +149,35 @@ async def login_for_access_token(login_request: LoginRequest):
     # Generate the access token
     access_token = create_access_token(data={"sub": db_user.email})
     
-    # Return the access token and token type
-    return {"access_token": access_token, "token_type": "bearer"}
+    # Return the access token and user details
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": {
+            "id": db_user.id,
+            "email": db_user.email,
+            "name": db_user.name,
+            "role": db_user.role,
+        },
+    }
 
 
 
+@router.get("/api/auth/session", response_model=UserResponse)
+async def get_current_user_session(current_user: User = Depends(get_current_user)):
+    """
+    Get the current logged-in user session information.
+    This depends on the `get_current_user` function that retrieves the user.
+    """
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "role": current_user.role,
+    }
 
-@router.post("/categories/", response_model=CategorySchema)
+
+@router.post("/categories", response_model=CategorySchema)
 async def create_category(category: CategoryCreateSchema):
     # Create a new category in the database
     category_obj = await Category.create(**category.dict())
@@ -165,10 +191,10 @@ async def get_category(category_id: int):
     except DoesNotExist:
         raise HTTPException(status_code=404, detail="Category not found")
 
-@router.get("/categories/", response_model=list[CategorySchema])
-async def get_categories():
-    categories = await Category.all()
-    return categories
+# @router.get("/categories/", response_model=list[CategorySchema])
+# async def get_categories():
+#     categories = await Category.all()
+#     return categories
 
 
 
@@ -400,3 +426,56 @@ async def create_tutorial(tutorial: Tutorial_PydanticIn):
 @router.get("/tutorials", response_model=list[Tutorial_Pydantic])
 async def get_tutorials():
     return await Tutorial_Pydantic.from_queryset(Tutorial.all())
+
+
+
+
+
+
+
+
+
+# Endpoint to get the summary of various metrics
+@router.get("/summary", response_model=SummaryResponse)
+async def get_summary(current_user: str = Depends(get_current_user)):
+    try:
+        # Total number of products
+        total_products = await Product.all().count()
+
+        # Total number of orders
+        total_orders = await Order.all().count()
+
+        # Total value of products (sum of price * quantity)
+        total_product_value = await Product.all().annotate(
+            total_value=(Product.price * Product.quantity)
+        ).all()
+
+        total_product_value = sum(product.total_value for product in total_product_value)
+
+        # Total value of orders (sum of price * quantity)
+        total_order_value = await Order.all().annotate(
+            total_value=(Order.price * Order.quantity)
+        ).all()
+
+        total_order_value = sum(order.total_value for order in total_order_value)
+
+        # Restrict access to shipping companies and business owners for normal users
+        if current_user.role == "business_owner":
+            total_shipping_companies = await ShippingCompany.all().count()
+            total_business_owners = await BusinessOwner.all().count()
+        else:
+            total_shipping_companies = 0
+            total_business_owners = 0
+
+        return SummaryResponse(
+            total_products=total_products,
+            total_orders=total_orders,
+            total_shipping_companies=total_shipping_companies,
+            total_business_owners=total_business_owners,
+            total_product_value=total_product_value,
+            total_order_value=total_order_value
+        )
+
+    except DoesNotExist as e:
+        raise HTTPException(status_code=404, detail=f"Resource not found: {str(e)}")
+
