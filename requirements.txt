@@ -2,6 +2,7 @@ fastapi
 tortoise-orm
 tortoise-cli
 aerich
+python-jose
 uvicorn[gunicorn]
 pydantic
 pydantic-settings
