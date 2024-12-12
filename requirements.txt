@@ -10,3 +10,4 @@ python-dotenv
 passlib
 psycopg2-binary
 PyJWT
+pydantic[email]
