@@ -11,3 +11,5 @@ passlib
 psycopg2-binary
 PyJWT
 pydantic[email]
+python-multipart
+fastapi[forms]
