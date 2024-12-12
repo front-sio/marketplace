@@ -66,6 +66,11 @@ from app.schemas import (
 router = APIRouter()
 
 
+
+@router.get("/")
+def read_root():
+    return {"message": "Hello, World!"}
+
 # User Endpoints
 @router.post("/register", response_model=UserResponse)
 async def register_user(user: UserCreate):
