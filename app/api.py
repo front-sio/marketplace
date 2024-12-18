@@ -1,19 +1,23 @@
 from fastapi import APIRouter, HTTPException, Depends, File, UploadFile, Form, Request
+from pydantic import ValidationError
 from tortoise.exceptions import DoesNotExist
-from app.core.security import hash_password, verify_password, create_access_token, pwd_context
+from app.core.security import hash_password, verify_password, create_access_token
 from app.db.session import init_db
 from tortoise.contrib.pydantic import pydantic_model_creator
 from app.core.security import get_current_user  # Assuming you have a function to get the logged-in user
-
-
-
+from typing import Optional
+from app.services.category_service import create_category, get_category_by_id, get_all_categories
+from typing import List
 from fastapi.responses import JSONResponse
 from io import BytesIO
 from pathlib import Path
 import shutil
 
 
+
+
 from app.models import (
+    Offer,
     User_Pydantic,
     User_PydanticIn,
     Product_Pydantic,
@@ -45,6 +49,8 @@ from app.schemas import (
     SignInResponse,
     ProductCreate, 
     ProductResponse, 
+    OfferRequest,
+    OfferResponse,
     OrderCreate, 
     OrderResponse, 
     ShippingCreate, 
@@ -56,20 +62,20 @@ from app.schemas import (
     BusinessOwnerResponse,
     BusinessOwnerCreate,
     CategoryCreateSchema, CategorySchema,
+    CategoryResponse,
     SummaryResponse
 )
 
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # router api
 router = APIRouter()
 
-
-
-@router.get("/")
-def read_root():
-    return {"message": "Hello, World!"}
 
 # User Endpoints
 @router.post("/register", response_model=UserResponse)
@@ -84,7 +90,9 @@ async def register_user(user: UserCreate):
 
     hashed_password = hash_password(user.password)
     new_user = await User.create(
-        name=user.name,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        username=user.username,
         email=user.email,
         hashed_password=hashed_password,
         role=user.role
@@ -99,170 +107,159 @@ async def register_business_owner(business_owner_data: BusinessOwnerCreate):
     # Check if the email already exists in the system
     existing_user = await User.get_or_none(email=business_owner_data.email)
     if existing_user:
-        raise HTTPException(status_code=400, detail="User with this email already exists")
+        raise HTTPException(
+            status_code=400, detail="User with this email already exists"
+        )
 
     # Hash the password provided by the user
-    hashed_password = pwd_context.hash(business_owner_data.password)
+    hashed_password = hash_password(business_owner_data.password)
 
     # Create a new user with the role "business_owner"
     user = User(
-        name=business_owner_data.business_name,  # Use business_name as user name for simplicity
-        email=business_owner_data.email,  # Use email as user identifier
-        hashed_password=hashed_password,  # Store the hashed password
-        role="business_owner"
+        first_name=business_owner_data.first_name,
+        last_name=business_owner_data.last_name,
+        username=business_owner_data.username,
+        email=business_owner_data.email,
+        hashed_password=hashed_password,
+        role="business_owner",
     )
-
-    # Save the user
+    # Save the user first
     await user.save()
 
-    
-    """
-    Create the business owner profile,
-    this allow user to register as business owner, in 
-    """
-    business_owner_profile = BusinessOwner(
+    # Save the business owner information with the user_id correctly set
+    business_owner = BusinessOwner(
         business_name=business_owner_data.business_name,
-        description=business_owner_data.description,  # Handle optional description
-        email=business_owner_data.email,
         phone=business_owner_data.phone,
         address=business_owner_data.address,
-        user_id=user.id  # Associate the user with the business owner profile
+        user_id=user.id,  # Explicitly set the user_id
+    )
+    await business_owner.save()
+
+    # Return the response
+    return BusinessOwnerResponse(
+        id=business_owner.id,
+        business_name=business_owner.business_name,
+        phone=business_owner.phone,
+        address=business_owner.address,
+        user_id=user.id,
     )
 
-    # Save the business owner profile
-    await business_owner_profile.save()
-
-    # Return the business owner response model
-    return BusinessOwnerResponse.from_orm(business_owner_profile)
 
 
 
-@router.post("/token", response_model=SignInResponse)
-async def login_for_access_token(login_request: LoginRequest):
-    await init_db()
-    
+
+@router.post("/token")
+async def login_for_access_token(login_data: LoginRequest):
     try:
-        # Get the user from the database by email
-        db_user = await User.get(email=login_request.email)
-        
-        # Verify the password
-        if not verify_password(login_request.password, db_user.hashed_password):
+        user = await User.get(email=login_data.email)
+        if not verify_password(login_data.password, user.hashed_password):
             raise HTTPException(status_code=400, detail="Invalid credentials")
-    except DoesNotExist:
+    except Exception:
         raise HTTPException(status_code=400, detail="Invalid credentials")
     
-    # Generate the access token
-    access_token = create_access_token(data={"sub": db_user.email})
-    
-    # Return the access token and user details
+    access_token = create_access_token(data={"sub": user.email})
+
     return {
         "access_token": access_token,
         "token_type": "bearer",
         "user": {
-            "id": db_user.id,
-            "email": db_user.email,
-            "name": db_user.name,
-            "role": db_user.role,
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
         },
     }
 
 
 
-@router.get("/api/auth/session", response_model=UserResponse)
-async def get_current_user_session(current_user: User = Depends(get_current_user)):
-    """
-    Get the current logged-in user session information.
-    This depends on the `get_current_user` function that retrieves the user.
-    """
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "name": current_user.name,
-        "role": current_user.role,
-    }
 
 
-@router.post("/categories", response_model=CategorySchema)
-async def create_category(category: CategoryCreateSchema):
-    # Create a new category in the database
-    category_obj = await Category.create(**category.dict())
-    return category_obj
+@router.post("/categories", response_model=CategoryResponse)
+async def add_category(category: CategoryCreateSchema):
+    # Create category logic (e.g., database operation)
+    category_instance = await create_category(category.name)  # Assuming `create_category` is implemented
+    return category_instance
 
-@router.get("/categories/{category_id}", response_model=CategorySchema)
-async def get_category(category_id: int):
-    try:
-        category_obj = await Category.get(id=category_id)
-        return category_obj
-    except DoesNotExist:
-        raise HTTPException(status_code=404, detail="Category not found")
 
-# @router.get("/categories/", response_model=list[CategorySchema])
-# async def get_categories():
-#     categories = await Category.all()
-#     return categories
+@router.get("/categories/{category_id}", response_model=CategoryResponse)
+async def fetch_category(category_id: int):
+    category = await get_category_by_id(category_id)
+    return category
+
+@router.get("/categories", response_model=List[CategoryResponse])
+async def list_categories():
+    categories = await get_all_categories()
+    return categories
 
 
 
 
 
-
-# Updated endpoint to accept individual fields in the form
 @router.post("/products", response_model=ProductResponse)
 async def create_product(
     name: str = Form(...),
     category_id: int = Form(...),
     price: float = Form(...),
     quantity: int = Form(...),
-    description: str = Form(...),
+    description: Optional[str] = Form(None),
     seller_id: int = Form(...),
-    image: UploadFile = File(None)  # Accept image upload (optional)
+    image: UploadFile = File(...),
 ):
-    # Check if the seller exists
+    # Step 1: Check if the user exists based on seller_id
     try:
-        seller = await BusinessOwner.get(id=seller_id)
+        user = await User.get(id=seller_id)  # Fetch the user by seller_id
     except DoesNotExist:
-        raise HTTPException(status_code=400, detail="Seller does not exist")
+        raise HTTPException(status_code=400, detail="User does not exist")
 
-    # Handle image upload (if provided)
+    # Step 2: Get the BusinessOwner related to the user
+    try:
+        business_owner = await BusinessOwner.get(user_id=user.id)  # Fetch the business owner by user_id
+    except DoesNotExist:
+        raise HTTPException(status_code=400, detail="Business owner does not exist for this user")
+
+    # Step 3: Now we have the business owner, use its ID to set the seller_id
+    seller_id = business_owner.id
+
+    # Step 4: Handle image upload if provided
     image_url = None
     if image:
-        # Define the path where the image will be saved
         image_path = Path("static/images") / image.filename
-        
-        # Ensure the directory exists before saving the image
         image_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Save the image to the static directory
-        image_url = str(image_path)  # Store the image path (URL) for referencing
+        image_url = str(image_path)
         with open(image_path, "wb") as f:
-            shutil.copyfileobj(image.file, f)  # Save the image file to the disk
+            shutil.copyfileobj(image.file, f)
 
-    # Get the category object
+    # Step 5: Get or create the category object
     try:
         category = await Category.get(id=category_id)
     except DoesNotExist:
         raise HTTPException(status_code=400, detail="Category does not exist")
 
-    # Create the product in the database
+    # Step 6: Create the product
     db_product = await Product.create(
         name=name,
         category=category,
         price=price,
         quantity=quantity,
         description=description,
-        seller_id=seller_id,  # Ensure the foreign key relationship is maintained
-        image=image_url if image else None  # Store the image URL in the product model if image was provided
+        seller_id=seller_id,  # Use seller_id from BusinessOwner
+        image=image_url if image else None
     )
 
-    # Return the created product as a response using ProductResponse
-    return ProductResponse.from_orm(db_product)
+    # Step 7: Return the created product response
+    return ProductResponse(
+        id=db_product.id,
+        name=db_product.name,
+        price=db_product.price,
+        quantity=db_product.quantity,
+        description=db_product.description,
+        seller_id=db_product.seller_id,
+        category_id=db_product.category.id,  # Access the category's ID
+        image=db_product.image
+    )
 
-
-
-
-import logging
-
-# logging.basicConfig(level=logging.DEBUG)
 
 
 @router.get("/products", response_model=list[ProductWithImageUrl])
@@ -273,7 +270,7 @@ async def get_products(request: Request, skip: int = 0, limit: int = 100):
     products = await Product_Pydantic.from_queryset(Product.all().offset(skip).limit(limit))
 
     if not products:
-        raise HTTPException(status_code=404, detail="No products found")
+        return []  # Return an empty list if no products are found
 
     products_with_url = []
     for product in products:
@@ -291,6 +288,35 @@ async def get_products(request: Request, skip: int = 0, limit: int = 100):
 
 
 
+@router.post("/offers", response_model=OfferResponse)
+async def create_offer(offer: OfferRequest):
+    # Get the product from the database using the product_id
+    try:
+        product = await Product.get(id=offer.product_id)
+    except DoesNotExist:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    # Check if the quantity available in the offer does not exceed the product's available stock
+    if offer.quantity_set > product.quantity:
+        raise HTTPException(status_code=400, detail="Offer quantity cannot exceed product's available stock")
+
+    # Create the offer in the database
+    new_offer = await Offer.create(
+        product=product,
+        price_from=offer.price_from,
+        discount_price=offer.discount_price,
+        quantity_set=offer.quantity_set,
+        min_order=offer.min_order,
+        max_order=offer.max_order,
+        end_date=offer.end_date
+    )
+
+    # Reduce the product quantity by the offer quantity
+    product.quantity -= offer.quantity_set
+    await product.save()
+
+    # Return the created offer
+    return OfferResponse.from_attributes(new_offer)
 
 
 
@@ -334,7 +360,7 @@ async def create_shipping(shipping: ShippingCreate):
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Validation Error: {e.errors()}"
         )
-    return ShippingResponse.from_orm(shipping_obj)
+    return ShippingResponse.from_attributes(shipping_obj)
 
 
 

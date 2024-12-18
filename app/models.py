@@ -3,6 +3,10 @@ from tortoise.models import Model
 from tortoise.contrib.pydantic import pydantic_model_creator
 from passlib.context import CryptContext
 from typing import Optional
+from datetime import datetime
+
+
+
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -11,7 +15,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # User Model
 class User(Model):
     id = fields.IntField(pk=True)
-    name = fields.CharField(max_length=50)
+    first_name = fields.CharField(max_length=50)
+    last_name = fields.CharField(max_length=50)
+    username = fields.CharField(max_length=50, unique=True)
     email = fields.CharField(max_length=100, unique=True)
     hashed_password = fields.CharField(max_length=255)
     role = fields.CharField(max_length=50, default="customer")  # Roles: "customer", "business_owner", etc.
@@ -23,7 +29,6 @@ class User(Model):
         null=True,
         on_delete=fields.CASCADE,
     )  # This creates a one-to-one relationship
-
 
     shipping_company_profile = fields.OneToOneField(
         "models.ShippingCompany",
@@ -49,15 +54,16 @@ class BusinessOwner(Model):
     business_name = fields.CharField(max_length=255)
     address = fields.TextField()
     phone = fields.CharField(max_length=50)
-    email = fields.CharField(max_length=50)
     created_at = fields.DatetimeField(auto_now_add=True)
 
-    # One-to-one link to User (does not need related_name on this side)
-    user_id = fields.IntField(null=True)  # Adjusted to avoid direct cyclic FK
-    # Note: Here, instead of linking `OneToOneField`, we just store `user_id`
+    # No need for 'user' field in BusinessOwner, because 'User' already links to it
+    # Just have the foreign key relationship in the User model.
+    user_id = fields.IntField()
 
     def __str__(self):
         return self.business_name
+
+
 
 
 
@@ -94,6 +100,27 @@ class Product(Model):
 
     def __str__(self):
         return self.name
+    
+
+
+class Offer(Model):
+    id = fields.IntField(pk=True)
+    product = fields.ForeignKeyField("models.Product", related_name="offers")  # The product this offer is related to
+    price_from = fields.DecimalField(max_digits=10, decimal_places=2)  # Original price
+    discount_price = fields.DecimalField(max_digits=10, decimal_places=2)  # Price after discount
+    quantity_set = fields.IntField()  # Quantity available for the offer
+    min_order = fields.IntField()  # Minimum quantity for an order
+    max_order = fields.IntField()  # Maximum quantity for an order
+    start_date = fields.DatetimeField(default=datetime.utcnow)  # Offer start date
+    end_date = fields.DatetimeField()  # Offer end date
+    created_at = fields.DatetimeField(auto_now_add=True)  # Created date for the offer
+    updated_at = fields.DatetimeField(auto_now=True)  # Last updated date for the offer
+
+    def __str__(self):
+        return f"Offer on {self.product.name} with {self.discount_price} discounted price"
+
+    class Meta:
+        table = "offers"
 
 
 

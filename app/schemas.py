@@ -1,17 +1,23 @@
-from pydantic import BaseModel, EmailStr, Field, root_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 from datetime import datetime
 from typing import Optional
+from decimal import Decimal
+from app.models import Product
 
 # -------------------- User Schemas -------------------- #
 class UserCreate(BaseModel):
-    name: str = Field(..., max_length=50)
+    first_name: str = Field(..., max_length=50)
+    last_name: str = Field(..., max_length=50)
+    username: str = Field(..., max_length=50)
     email: EmailStr
     password: str
     role: str = Field(default="customer")  # Default role is "customer"
 
 class UserResponse(BaseModel):
     id: int
-    name: str
+    first_name: str
+    last_name: str
+    username: Optional[str] = None
     email: EmailStr
     role: str
 
@@ -20,7 +26,9 @@ class UserResponse(BaseModel):
 
 class UserRead(BaseModel):
     id: int
-    name: str
+    first_name: str
+    last_name: str
+    username: str
     email: EmailStr
     role: str
 
@@ -53,7 +61,9 @@ class SignInResponse(BaseModel):
 # -------------------- Business Owner Schemas -------------------- #
 class BusinessOwnerCreate(BaseModel):
     business_name: str = Field(..., max_length=255)
-    description: Optional[str]
+    first_name: str = Field(..., max_length=255)
+    last_name: str = Field(..., max_length=255)
+    username: str = Field(..., max_length=255)
     email: Optional[EmailStr]
     password: str
     phone: Optional[str]  # Make sure this is Optional
@@ -63,7 +73,6 @@ class BusinessOwnerCreate(BaseModel):
 class BusinessOwnerResponse(BaseModel):
     id: int
     business_name: str
-    description: Optional[str] = None  # Make description optional
     phone: Optional[str] = None
     address: Optional[str] = None
     user_id: int
@@ -73,7 +82,7 @@ class BusinessOwnerResponse(BaseModel):
 
 
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
     def check_description(cls, values):
         # You can check or modify 'description' here
         if 'description' in values and values['description'] == "":
@@ -96,6 +105,14 @@ class CategorySchema(CategoryCreateSchema):
         from_attributes = True
 
 
+class CategoryResponse(BaseModel):
+    id: int
+    name: str
+
+    class Config:
+        orm_mode = True
+
+
 
 # -------------------- Product Schemas -------------------- #
 class ProductCreate(BaseModel):
@@ -105,12 +122,13 @@ class ProductCreate(BaseModel):
     quantity: int
     description: Optional[str]
     seller_id: int  # The ID of the BusinessOwner selling the product
-    image: str
+    image: Optional[str]  # Keep as string for image URL or file name if not uploading
+
 
 class ProductResponse(BaseModel):
     id: int
     name: str
-    category: int  # Use category name instead of ID
+    category_id: int  # Use category name instead of ID
     price: float
     quantity: int
     description: Optional[str]
@@ -133,6 +151,36 @@ class ProductWithImageUrl(BaseModel):
         from_attributes = True
 
 
+
+#---------------------offer schemas-------------#
+class OfferRequest(BaseModel):
+    product_id: int
+    price_from: Decimal
+    discount_price: Decimal
+    quantity_set: int
+    min_order: int
+    max_order: int
+    end_date: datetime  # Offer end date
+
+    class Config:
+        orm_mode = True
+
+
+class OfferResponse(BaseModel):
+    id: int
+    product_id: int
+    price_from: Decimal
+    discount_price: Decimal
+    quantity_set: int
+    min_order: int
+    max_order: int
+    start_date: datetime
+    end_date: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        orm_mode = True
 
 # -------------------- Order Schemas -------------------- #
 # Assuming you have an ORM model `Order` and `Product` for price

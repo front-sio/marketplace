@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from jose import JWTError, jwt
 from datetime import datetime, timedelta
 
